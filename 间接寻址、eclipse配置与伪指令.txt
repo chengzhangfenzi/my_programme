@@ -1,0 +1,158 @@
+------------------------------------------------------------------------
+;ldr寻址	
+	area example,code,readonly
+	entry
+start
+	ldr r0,=array
+loop
+	ldr r1,[r0],#4
+	cmp r1,#0
+	addne r4,r4,r1
+	bne loop
+
+over 
+	b over
+
+array
+	dcd 0x11
+	dcd 0x22
+	dcd 0
+	end
+------------------------------------------------------------------------
+;压栈与退栈表示嵌套循环
+	ldr sp,=0x40000080
+	
+	mov r1,#0x11
+	mov r2,#0x22
+	mov r3,#0x33
+	mov r4,#0x44
+	bl func1
+	add r0,r1,r2
+func1
+	stmfd sp!,{r1-r4,lr}
+	mov r1,#0x55
+	mov r2,#0x66
+	mov r3,#0x77
+	mov r4,#0x88
+	bl func2
+	ldmfd sp!,{r1-r4,pc}
+func2
+	stmfd sp!,{r1-r4,lr}
+	mov r1,#0x99
+	mov r2,#0xaa
+	mov r3,#0xbb
+	mov r4,#0xcc
+	bl func3
+	ldmfd sp!,{r1-r4,pc}
+func3
+	stmfd sp!,{r1-r4,lr}
+	add r0,r1,r2
+	ldmfd sp!,{r1-r4,pc}
+over 
+	b over
+------------------------------------------------------------------------
+;系统调用给swi 5 的5是用LR寄存器来使得系统调用open函数
+	area first, code, readonly
+	code32
+	entry
+; 定义的异常向量表
+vector
+	b reset_handler  ; 跳转到 reset_handler
+	nop	
+	b swi_handler	 ; SWI 指令异常跳转的地址
+	nop	
+	nop	
+	nop	
+	nop
+	nop	
+
+swi_handler
+	; swi handler code 
+	; 异常处理首先要压栈保存处理器现场
+	
+	mrs r0, cpsr
+	bic r0, r0, #0x1f
+	orr r0, r0, #0x10
+;	msr cpsr_c, r0
+;	mov pc, lr
+	
+	
+	ldr r0, [lr, #-4]		 ; 获得SWI指令的机器码
+	bic r0, r0, #0xff000000  ; 通过机器码获得SWI NUMBER
+	
+	movs pc, lr	; lr > pc 且 spsr -> cpsr返回 SVC -> USER
+
+reset_handler
+	; 初始化 SVC 模式堆栈
+	ldr sp, =0x40002000
+
+	; 修改当前的模式从SVC模式改变为USER模式
+	mrs r0, cpsr
+	bic r0, r0, #0x1f
+	orr r0, r0, #0x10
+	msr cpsr_c, r0
+
+    ; 初始化 USER 模式堆栈
+	ldr sp, =0x40001000
+
+	mov r0, #1    
+	
+	; USER SWI
+	swi 5  ; open  APP USER 这条语句由用户程序自己出发异常   
+	; 观察并记录对比指令执行前后的 PC LR CPSR SPSR SP的变化	
+	;并思考异常产生后处理器硬件自动发生了那些变化
+
+	add r1, r0, r0
+stop
+	b stop
+	end	
+------------------------------------------------------------------------
+;eclipse环境配置
+start.s
+.global _start
+_start:
+	ldr sp,=0x41000000
+	b main
+stop:
+	b stop
+.end
+
+
+
+main.c
+int main(int argc,char **argv)
+{
+	return 0;
+}
+
+
+Makefile
+TARTGET=start
+TARGETC=main
+all:
+	arm-none-eabi-gcc -O0 -g -c -o $(TARGETC).o $(TARGETC).c
+	arm-none-eabi-gcc -O0 -g -c -o $(TARTGET).o $(TARTGET).s
+	arm-none-eabi-ld $(TARGETC).o $(TARTGET).o -Ttext 0x40008000 -o $(TARTGET).elf
+	arm-none-eabi-objcopy -O binary -S $(TARTGET).elf $(TARTGET).bin
+clean:
+	rm -rf *.o *.elf *.dis *.bin
+------------------------------------------------------------------------
+;控制伪指令
+	GBLL TEST
+TEST SETL {false}
+
+	area first, code, readonly
+	code32
+	entry
+start
+	mov r1,#12
+	mov r2,#12
+	if TEST = {TRUE}
+		MOV R1,#1
+	ELSE
+		MOV R1,#2
+	ENDIF
+ 
+stop
+	b stop
+	end 
